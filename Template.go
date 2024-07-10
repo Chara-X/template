@@ -28,7 +28,7 @@ func (t *Template) execute(node parse.Node, w io.Writer, data reflect.Value) {
 	switch node := node.(type) {
 	case *parse.CommentNode:
 	case *parse.IfNode:
-		if t.evalPipe(node.Pipe, data).Bool() {
+		if t.eval(node.Pipe, data).Bool() {
 			t.execute(node.List, w, data)
 		} else if node.ElseList != nil {
 			t.execute(node.ElseList, w, data)
@@ -47,7 +47,7 @@ func (t *Template) execute(node parse.Node, w io.Writer, data reflect.Value) {
 				panic(err)
 			}
 		}()
-		switch arg := t.evalPipe(node.Pipe, data); arg.Kind() {
+		switch arg := t.eval(node.Pipe, data); arg.Kind() {
 		case reflect.Array, reflect.Slice:
 			for i := 0; i < arg.Len(); i++ {
 				iter(arg.Index(i))
@@ -64,39 +64,43 @@ func (t *Template) execute(node parse.Node, w io.Writer, data reflect.Value) {
 			t.execute(node, w, data)
 		}
 	case *parse.TemplateNode:
-		(&Template{t.trees[node.Name], t.trees, t.funcs}).Execute(w, t.evalPipe(node.Pipe, data))
+		(&Template{t.trees[node.Name], t.trees, t.funcs}).Execute(w, t.eval(node.Pipe, data))
 	case *parse.ActionNode:
-		fmt.Fprint(w, t.evalCommand(node.Pipe.Cmds[0], data).Interface())
+		fmt.Fprint(w, t.eval(node.Pipe.Cmds[0], data).Interface())
 	case *parse.TextNode:
 		w.Write([]byte(node.Text))
 	default:
 		panic(node.Type())
 	}
 }
-func (t *Template) evalPipe(pipe *parse.PipeNode, data reflect.Value) reflect.Value {
-	return t.evalCommand(pipe.Cmds[0], data)
-}
-func (t *Template) evalCommand(cmd *parse.CommandNode, data reflect.Value) reflect.Value {
-	switch arg := cmd.Args[0].(type) {
-	case *parse.IdentifierNode:
-		var args = make([]reflect.Value, len(cmd.Args)-1)
-		for i, arg := range cmd.Args[1:] {
-			args[i] = t.evalCommand(arg.(*parse.CommandNode), data)
+func (t *Template) eval(node parse.Node, data reflect.Value) reflect.Value {
+	switch node := node.(type) {
+	case *parse.PipeNode:
+		return t.eval(node.Cmds[0], data)
+	case *parse.CommandNode:
+		switch arg := node.Args[0].(type) {
+		case *parse.IdentifierNode:
+			var args = []reflect.Value{}
+			for _, arg := range node.Args[1:] {
+				args = append(args, t.eval(arg, data))
+			}
+			return t.funcs[arg.Ident].Call(args)[0]
+		default:
+			return t.eval(arg, data)
 		}
-		return t.funcs[arg.Ident].Call(args)[0]
 	case *parse.NumberNode:
 		switch {
-		case arg.IsFloat:
-			return reflect.ValueOf(arg.Float64)
-		case arg.IsInt:
-			return reflect.ValueOf(int(arg.Int64))
+		case node.IsFloat:
+			return reflect.ValueOf(node.Float64)
+		case node.IsInt:
+			return reflect.ValueOf(int(node.Int64))
 		}
 	case *parse.BoolNode:
-		return reflect.ValueOf(arg.True)
+		return reflect.ValueOf(node.True)
 	case *parse.StringNode:
-		return reflect.ValueOf(arg.Text)
+		return reflect.ValueOf(node.Text)
 	case *parse.DotNode:
 		return data
 	}
-	panic(cmd.Args[0].Type())
+	panic(node.Type())
 }
