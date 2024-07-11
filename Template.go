@@ -88,6 +88,12 @@ func (t *Template) eval(node parse.Node, data reflect.Value) reflect.Value {
 		default:
 			return t.eval(arg, data)
 		}
+	case *parse.FieldNode:
+		var field = data.FieldByName(node.Ident[0])
+		for _, ident := range node.Ident[1:] {
+			field = field.FieldByName(ident)
+		}
+		return field
 	case *parse.NumberNode:
 		switch {
 		case node.IsFloat:
