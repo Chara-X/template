@@ -1,23 +1,32 @@
 package template
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
 	"text/template/parse"
 )
 
+var (
+	errContinue = errors.New("continue")
+	errBreak    = errors.New("break")
+)
+
 type Template struct {
-	tree  *parse.Tree
-	trees map[string]*parse.Tree
-	funcs map[string]reflect.Value
+	tree      *parse.Tree
+	templates map[string]*Template
+	funcs     map[string]reflect.Value
 }
 
 func New(name, text string, funcs map[string]any) *Template {
 	var t = &Template{}
-	t.trees = map[string]*parse.Tree{}
-	t.tree, _ = parse.New(name).Parse(text, "", "", t.trees, funcs)
-	t.funcs = map[string]reflect.Value{}
+	var trees = map[string]*parse.Tree{}
+	t.tree, _ = parse.New(name).Parse(text, "", "", trees, funcs)
+	t.templates, t.funcs = map[string]*Template{}, map[string]reflect.Value{}
+	for name, tree := range trees {
+		t.templates[name] = &Template{tree, t.templates, t.funcs}
+	}
 	for name, fn := range funcs {
 		t.funcs[name] = reflect.ValueOf(fn)
 	}
@@ -64,7 +73,7 @@ func (t *Template) execute(node parse.Node, w io.Writer, data reflect.Value) {
 			t.execute(node, w, data)
 		}
 	case *parse.TemplateNode:
-		(&Template{t.trees[node.Name], t.trees, t.funcs}).Execute(w, t.eval(node.Pipe, data))
+		t.templates[node.Name].Execute(w, t.eval(node.Pipe, data))
 	case *parse.ActionNode:
 		fmt.Fprint(w, t.eval(node.Pipe.Cmds[0], data).Interface())
 	case *parse.TextNode:
